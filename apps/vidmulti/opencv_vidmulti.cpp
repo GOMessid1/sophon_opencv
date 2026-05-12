@@ -48,7 +48,6 @@ std::uniform_int_distribution<int> distribution(0,2*ONE_FRAME_CLOCK);
 string g_filename[MAX_THREAD_NUM];
 int g_card[MAX_THREAD_NUM];
 int g_enc[MAX_THREAD_NUM];
-cv::VideoCapture g_cap[MAX_THREAD_NUM];
 int g_thread_running[MAX_THREAD_NUM];
 
 uint64_t g_reconnect_count[MAX_THREAD_NUM];
@@ -131,37 +130,11 @@ print_trace (void)
 void signal_handler(int signum) {
    // Release handle before crash in case we cannot reopen it again.
    g_exit_flag = 1;     // exit all threads
-   int try_count = 100;
    cout << "signal " << signum << endl;
 
    signal(signum, SIG_IGN);
 
    print_trace();
-   /* wait thread quit for 1s */
-   while (try_count--){
-     bool exit_all = true;
-     for (int i = 0; i < MAX_THREAD_NUM; i++) {
-         if(g_thread_running[i]){
-             exit_all = false;
-         }
-     }
-     if(exit_all){
-         break;
-     }
-
-#ifdef WIN32
-     Sleep(10);
-#else
-     usleep(10000);
-#endif
-   }
-
-   for (int i = 0; i < MAX_THREAD_NUM; i++) {
-      if (g_cap[i].isOpened()){
-          cout << "thread " << i << "timed out! Force to release video capture!" << endl;
-          g_cap[i].release();
-      }
-   }
    // Reset the signal handler as default
    signal(signum, SIG_DFL);
 
@@ -461,25 +434,25 @@ void *video_download_pthread(void * arg)
     struct timeval tv1, tv2, tv0;
 #endif
 
-    cv::VideoCapture *cap = &g_cap[id];
+    cv::VideoCapture cap;
     g_video_lock[id].lock();
     g_thread_running[id] = g_thread_running[id] | 0x1;
     g_video_lock[id].unlock();
 
-    if (!cap->open(g_filename[id], cv::CAP_ANY, g_card[id])) {
+    if (!cap.open(g_filename[id], cv::CAP_ANY, g_card[id])) {
         cout << "open " << g_filename[id] << " failed!" << endl;
         return NULL;
     }
 
-    if (!cap->isOpened()) {
+    if (!cap.isOpened()) {
         cout << "Failed to open camera!" << endl;
         return NULL;
     }
 
-    cap->set(cv::CAP_PROP_OUTPUT_YUV, PROP_TRUE);
+    cap.set(cv::CAP_PROP_OUTPUT_YUV, PROP_TRUE);
 
-    int height = (int) cap->get(cv::CAP_PROP_FRAME_HEIGHT);
-    int width  = (int) cap->get(cv::CAP_PROP_FRAME_WIDTH);
+    int height = (int) cap.get(cv::CAP_PROP_FRAME_HEIGHT);
+    int width  = (int) cap.get(cv::CAP_PROP_FRAME_WIDTH);
 
 #ifndef HAVE_BMCV
     cv::Mat image(height, width, CV_8UC3);
@@ -503,13 +476,13 @@ void *video_download_pthread(void * arg)
     while (!g_exit_flag) {
         cv::Mat frame;
 
-        cap->read(frame);
+        cap.read(frame);
 
 #ifndef HAVE_BMCV
         cv::vpp::toMat(frame, image);
 #endif
 
-        int64_t pts = (int64_t)cap->get(cv::CAP_PROP_TIMESTAMP);
+        int64_t pts = (int64_t)cap.get(cv::CAP_PROP_TIMESTAMP);
         if (g_dump_flag[id]) {
             g_dump_flag[id] = 0;
 #ifdef HAVE_BMCV
@@ -524,13 +497,14 @@ void *video_download_pthread(void * arg)
 #else
         if(image.empty()) {
 #endif
-            if ((int)cap->get(cv::CAP_PROP_STATUS) == 2) { // eof
+            if ((int)cap.get(cv::CAP_PROP_STATUS) == 2) { // eof
                 cout << "file ends!" << endl;
 
                 //if(!reopen_flag)
-                cap->release();
-                cap->open(g_filename[id], cv::CAP_ANY, g_card[id]);
-                cap->set(cv::CAP_PROP_OUTPUT_YUV, PROP_TRUE);
+                if (cap.isOpened())
+                    cap.release();
+                cap.open(g_filename[id], cv::CAP_ANY, g_card[id]);
+                cap.set(cv::CAP_PROP_OUTPUT_YUV, PROP_TRUE);
                 cout << "loop again id:"<< id  <<"rtsp: "<< g_filename[id] << endl;
                 g_reconnect_count[id]++;
 
@@ -538,9 +512,10 @@ void *video_download_pthread(void * arg)
                 empty_times++;
                 if (empty_times > 50*30){
                     cout << "image empty times:" << empty_times <<endl;
-                    cap->release();
-                    cap->open(g_filename[id], cv::CAP_ANY, g_card[id]);
-                    cap->set(cv::CAP_PROP_OUTPUT_YUV, PROP_TRUE);
+                    if (cap.isOpened())
+                        cap.release();
+                    cap.open(g_filename[id], cv::CAP_ANY, g_card[id]);
+                    cap.set(cv::CAP_PROP_OUTPUT_YUV, PROP_TRUE);
                     cout << "loop again id:"<< id  <<"rtsp: "<< g_filename[id] << endl;
                     empty_times = 0;
                     g_reconnect_count[id]++;
@@ -580,14 +555,15 @@ void *video_download_pthread(void * arg)
         count[id]++;
 
         if ((reopen_flag==1)&&(count[id] % 400 == 0)){
-            cap->release();
-            cap->open(g_filename[id], cv::CAP_ANY, g_card[id]);
-            if (cap->isOpened()) {
+            if (cap.isOpened())
+                cap.release();
+            cap.open(g_filename[id], cv::CAP_ANY, g_card[id]);
+            if (cap.isOpened()) {
                 cout << "reopen camera!" << endl;
             } else {
                 cout << "reopen ERROR!" << endl;
             }
-            cap->set(cv::CAP_PROP_OUTPUT_YUV, PROP_TRUE);
+            cap.set(cv::CAP_PROP_OUTPUT_YUV, PROP_TRUE);
             continue;
         }
 
@@ -626,8 +602,8 @@ void *video_download_pthread(void * arg)
         }
     }
 
-    if (cap->isOpened())
-        cap->release();
+    if (cap.isOpened())
+        cap.release();
 
     g_video_lock[id].lock();
     g_thread_running[id] = g_thread_running[id] & ~0x1;
