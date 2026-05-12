@@ -63,6 +63,12 @@ CV_EXPORTS bm_status_t hwGaussianBlur(InputArray _src, OutputArray _dst, int kw,
 CV_EXPORTS bm_status_t bitwise_and(InputArray src1, InputArray src2, OutputArray dst, bool update = true);
 CV_EXPORTS bm_status_t bitwise_or(InputArray src1, InputArray src2, OutputArray dst, bool update = true);
 CV_EXPORTS bm_status_t bitwise_xor(InputArray src1, InputArray src2, OutputArray dst, bool update = true);
+CV_EXPORTS bm_status_t threshold(InputArray _src, OutputArray dst, unsigned char thresh, unsigned char max_value, int type, bool update);
+CV_EXPORTS bm_status_t absdiff(InputArray src1, InputArray src2, OutputArray dst, bool update = true);
+CV_EXPORTS bm_status_t rotate(InputArray src1, OutputArray dst, int rotateMode, bool update = true);
+CV_EXPORTS bm_status_t rectangle(Mat &m, std::vector<Rect> &vrt, const Scalar& color, int thickness, bool update = true);
+CV_EXPORTS bm_status_t rectangle(InputOutputArray _img, Point pt1, Point pt2, const Scalar& color, int thickness, bool update = true);
+CV_EXPORTS bm_status_t rectangle(InputOutputArray img, Rect rec, const Scalar& color, int thickness, bool update = true);
 
 CV_EXPORTS void print(Mat &m, bool dump = false);
 CV_EXPORTS void print(bm_image *image, bool dump = false);

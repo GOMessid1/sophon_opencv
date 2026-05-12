@@ -412,6 +412,38 @@ void Mat::create(int d, const int* _sizes, int _type, int id)
     flags = (_type & CV_MAT_TYPE_MASK) | MAGIC_VAL;
     setSize(*this, d, _sizes, 0, true);
 
+#ifdef USING_SOC
+    int _alloc_dev = 0;
+#if !defined(ENABLE_BMCPU)
+    static int alloc_dev[4] = {0, 1, 1, 1};
+#else
+    static int alloc_dev[4] = {0, 0, 0, 0};
+#endif
+#else
+    int _alloc_dev = 1;
+    static int alloc_dev[4] = {1, 1, 1, 1};
+#endif
+    static char first_call = true;
+    if (first_call) {
+        char *envflag = getenv("ALLOC_DEV_8UC1");
+        if (envflag)
+            alloc_dev[0] = atoi(envflag);
+        envflag = getenv("ALLOC_DEV_8UC3");
+        if (envflag)
+            alloc_dev[1] = atoi(envflag);
+        envflag = getenv("ALLOC_DEV_32FC1");
+        if (envflag)
+            alloc_dev[2] = atoi(envflag);
+        envflag = getenv("ALLOC_DEV_32FC3");
+        if (envflag)
+            alloc_dev[3] = atoi(envflag);
+        first_call = false;
+    }
+    _alloc_dev = (_type == CV_8UC1 ? alloc_dev[0] :
+        (_type == CV_8UC3 ? alloc_dev[1] :
+        (_type == CV_32FC1 ? alloc_dev[2] :
+        (_type == CV_32FC3 ? alloc_dev[3] : _alloc_dev))));
+
     if( total() > 0 )
     {
         MatAllocator *a = allocator, *a0 = getDefaultAllocator();
@@ -421,11 +453,12 @@ void Mat::create(int d, const int* _sizes, int _type, int id)
 #endif
 #ifdef USING_SOC
 #if !defined(ENABLE_BMCPU)
-        if ( dims == 2 && (_type == CV_8UC3 || _type == CV_32FC3 /*|| _type == CV_8UC1*/ || _type == CV_32FC1) && size[0] >= 16 && size[1] >= 16)
+        if ( dims == 2 && _alloc_dev && size[0] >= 16 && size[1] >= 16)
             a0 = hal::getAllocator();
 #endif
 #else
-        a0 = hal::getAllocator();
+        if (_alloc_dev)
+            a0 = hal::getAllocator();
 #endif
         if(!a)
             a = a0;

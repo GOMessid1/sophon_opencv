@@ -1858,14 +1858,18 @@ bool BMJpegEncoder::prepareEncInputParams(BmJpuJPEGEncParams& encParams, int& bs
                                           void* file)
 {
     int width, height, channels;
-    int raw_size;
+    int mcuw = 16;
+    int mcuh = 16;
+    int chromasf = 1;
+    long long aligned_width;
+    long long aligned_height;
+    long long bs_size64;
     BmJpuImageFormat out_image_format = BM_JPU_IMAGE_FORMAT_YUV420P;
     if(!is_yuv_mat)
     {
         width  = img.cols;
         height = img.rows;
         channels = img.channels();
-        raw_size = width * height * 3/2; // will convert to yuv420 later
         if (channels != 3 && channels != 1)
         {
             fprintf(stderr, "Error! Unsupported img.channels %d.\n", channels);
@@ -1874,42 +1878,34 @@ bool BMJpegEncoder::prepareEncInputParams(BmJpuJPEGEncParams& encParams, int& bs
         if (channels == 1)
         {
             out_image_format = BM_JPU_IMAGE_FORMAT_GRAY;
-            raw_size = width * height;
         }
     }
     else
     {
         width  = img.cols;
         height = img.rows;
-        raw_size = width * height;
         int format = img.avFormat();
 
         switch (format)
         {
         case AV_PIX_FMT_NV12:
             out_image_format = BM_JPU_IMAGE_FORMAT_NV12;
-            raw_size = raw_size * 3/2;
             break;
         case AV_PIX_FMT_NV16:
             out_image_format = BM_JPU_IMAGE_FORMAT_NV16;
-            raw_size = raw_size * 2;
             break;
         case AV_PIX_FMT_YUV444P:
         case AV_PIX_FMT_GBRP:
             out_image_format = BM_JPU_IMAGE_FORMAT_YUV444P;
-            raw_size = raw_size * 3;
             break;
         case AV_PIX_FMT_GRAY8:
             out_image_format = BM_JPU_IMAGE_FORMAT_GRAY;
-            raw_size = raw_size * 1;
             break;
         case AV_PIX_FMT_YUV420P:
             out_image_format = BM_JPU_IMAGE_FORMAT_YUV420P;
-            raw_size = raw_size * 3/2;
             break;
         case AV_PIX_FMT_YUV422P:
             out_image_format = BM_JPU_IMAGE_FORMAT_YUV422P;
-            raw_size = raw_size * 2;
             break;
         default:
             fprintf(stderr, "Error! Unsupported encoded image_format %d.\n", format);
@@ -1924,19 +1920,54 @@ bool BMJpegEncoder::prepareEncInputParams(BmJpuJPEGEncParams& encParams, int& bs
     }
 
     int quality = 85;
-    int min_ratio = 1;   /* assume the min compression ratio is 1 */
     for( size_t i = 0; i < params.size(); i += 2 )  //get quality from params
     {
         if( params[i] == CV_IMWRITE_JPEG_QUALITY )
         {
             quality = params[i+1];
             quality = MIN(MAX(quality, 0), 100);
-            if(quality >= 95)
-                min_ratio = 1;  //for some picture it's hard to compress
         }
     }
 
-    bs_buffer_size = raw_size/min_ratio;
+    switch (out_image_format) {
+    case BM_JPU_IMAGE_FORMAT_YUV420P:
+    case BM_JPU_IMAGE_FORMAT_NV12:
+    case BM_JPU_IMAGE_FORMAT_NV21:
+        mcuw = 16;
+        mcuh = 16;
+        chromasf = 1;
+        break;
+    case BM_JPU_IMAGE_FORMAT_YUV422P:
+    case BM_JPU_IMAGE_FORMAT_NV16:
+    case BM_JPU_IMAGE_FORMAT_NV61:
+        mcuw = 16;
+        mcuh = 8;
+        chromasf = 2;
+        break;
+    case BM_JPU_IMAGE_FORMAT_GRAY:
+        mcuw = 8;
+        mcuh = 8;
+        chromasf = 0;
+        break;
+    case BM_JPU_IMAGE_FORMAT_YUV444P:
+    case BM_JPU_IMAGE_FORMAT_RGB:
+    default:
+        mcuw = 8;
+        mcuh = 8;
+        chromasf = 4;
+        break;
+    }
+
+    aligned_width  = ((long long)width  + mcuw - 1) / mcuw * mcuw;
+    aligned_height = ((long long)height + mcuh - 1) / mcuh * mcuh;
+    bs_size64 = aligned_width * aligned_height * (2 + chromasf) + 2048;
+    if (bs_size64 <= 0 || bs_size64 > INT_MAX)
+    {
+        fprintf(stderr, "Error! invalid bs buffer size: %lld\n", bs_size64);
+        return false;
+    }
+
+    bs_buffer_size = (int)bs_size64;
     /* bitstream buffer size in unit of 16k */
     bs_buffer_size = (bs_buffer_size+BS_MASK)&(~BS_MASK);
     // if (bs_buffer_size >= 16*1023*1024)
@@ -2132,7 +2163,7 @@ bool BMJpegEncoder::prepareInternalDMABuffer(BmJpuFramebuffer& framebuffer, int 
 #if 0
     static int ab= 0;
     unsigned long long vmem = 0;
-    bm_handle_t handle = bm_jpu_enc_get_bm_handle(m_device_id);
+    handle = bm_jpu_enc_get_bm_handle(m_device_id);
     bm_mem_mmap_device_mem(handle, framebuffer.dma_buffer, &vmem);
     uint8_t* p_virt_addr2 = (uint8_t*)vmem;
     dump_jpu_framebuf((char*)"jpuenc", p_virt_addr2, framebuffer, width, height, DUMP_OUT, FORMAT_420, ab++);

@@ -1014,9 +1014,350 @@ done:
     if (dst_crop) delete[] dst_crop;
 
     return ret;
- }
+}
 
- bm_status_t bitwise_and(InputArray a, InputArray b, OutputArray c, bool update) {
+bm_status_t threshold(InputArray _src, OutputArray dst, unsigned char thresh, unsigned char max_value, int type, bool update) {
+  Mat m, output;
+  if( _src.kind() != _InputArray::MAT || dst.kind() != _OutputArray::MAT) {printf("src must be of type cv::Mat.\n"); return BM_NOT_SUPPORTED;}
+  m = _src.getMat();
+  if (!m.u || !m.u->addr) {printf("Memory allocated by user, no device memory assigned. Not support BMCV!\n"); return BM_NOT_SUPPORTED;}
+  bm_status_t ret = BM_SUCCESS;
+  bm_handle_t handle = m.u->hid ? m.u->hid : getCard();
+  if(handle == 0)
+  {
+    printf("bmcv is not open or src mat is not ION \n");
+    return BM_ERR_FAILURE;
+  }
+
+  bm_image src;
+  bm_image bm_output;
+  toBMI(m, &src, update);
+  if (!dst.empty()) {
+    output = dst.getMat();
+    CV_Assert(output.cols == m.cols);
+    CV_Assert(output.rows == m.rows);
+    toBMI(output, &bm_output, update);
+  } else {
+    bm_image_create(handle, m.rows, m.cols, (bm_image_format_ext)src.image_format, DATA_TYPE_EXT_1N_BYTE, &bm_output, NULL);
+    ret = bm_image_alloc_dev_mem(bm_output, 2);
+    if (ret != BM_SUCCESS) {
+        printf("dst bm_image_alloc_dev_mem failed. ret = %d\n", ret);
+    }
+  }
+
+  ret = bmcv_image_threshold(handle, src, bm_output, thresh, max_value, (bm_thresh_type_t)type);
+  if (ret != BM_SUCCESS) goto done;
+  bm_thread_sync(handle);
+
+  toMAT(&bm_output, output, update);
+  dst.assign(output);
+
+#ifndef USING_SOC
+  if (update) download(handle, output, &bm_output);
+#endif
+
+done:
+  bm_image_destroy(src);
+  bm_image_destroy(bm_output);
+  return ret;
+}
+
+bm_status_t absdiff(InputArray src1, InputArray src2, OutputArray dst, bool update) {
+  Mat m0, m1, output;
+  if( src1.kind() != _InputArray::MAT || src2.kind() != _InputArray::MAT || dst.kind() != _OutputArray::MAT) {printf("src must be of type cv::Mat.\n"); return BM_NOT_SUPPORTED;}
+  m0 = src1.getMat();
+  m1 = src2.getMat();
+  if (!m0.u || !m0.u->addr || !m1.u || !m1.u->addr) {printf("Memory allocated by user, no device memory assigned. Not support BMCV!\n"); return BM_NOT_SUPPORTED;}
+  bm_handle_t handle = m0.u->hid ? m0.u->hid : getCard();
+  if(handle == 0)
+  {
+    printf("bmcv is not open or src mat is not ION \n");
+    return BM_ERR_FAILURE;
+  }
+  bm_status_t ret = BM_SUCCESS;
+  bm_image bm_src1;
+  bm_image bm_src2;
+  bm_image bm_output;
+  toBMI(m0, &bm_src1, update);
+  toBMI(m1, &bm_src2, update);
+  if (!dst.empty()) {
+    output = dst.getMat();
+    CV_Assert(output.cols == m0.cols);
+    CV_Assert(output.rows == m0.rows);
+    toBMI(output, &bm_output, update);
+  } else {
+    bm_image_create(handle, m0.rows, m0.cols, (bm_image_format_ext)bm_src1.image_format, DATA_TYPE_EXT_1N_BYTE, &bm_output, NULL);
+    ret = bm_image_alloc_dev_mem(bm_output, 2);
+    if (ret != BM_SUCCESS) {
+        printf("dst bm_image_alloc_dev_mem failed. ret = %d\n", ret);
+    }
+  }
+
+  ret = bmcv_image_absdiff(handle, bm_src1, bm_src2, bm_output);
+  if (ret != BM_SUCCESS) {
+    printf("Create bm handle failed. ret = %d\n", ret);
+    goto done;
+  }
+
+  bm_thread_sync(handle);
+  toMAT(&bm_output, output, update);
+  dst.assign(output);
+
+done:
+  bm_image_destroy(bm_src1);
+  bm_image_destroy(bm_src2);
+  bm_image_destroy(bm_output);
+  return ret;
+}
+
+bm_status_t rotate(InputArray src1, OutputArray dst, int rotateMode, bool update) {
+  Mat m, output;
+  if( src1.kind() != _InputArray::MAT || dst.kind() != _OutputArray::MAT) {printf("src must be of type cv::Mat.\n"); return BM_NOT_SUPPORTED;}
+  m = src1.getMat();
+  if (!m.u || !m.u->addr) {printf("Memory allocated by user, no device memory assigned. Not support BMCV!\n"); return BM_NOT_SUPPORTED;}
+  bm_status_t ret = BM_SUCCESS;
+  bm_handle_t handle = m.u->hid ? m.u->hid : getCard();
+  if(handle == 0)
+  {
+    printf("bmcv is not open or src mat is not ION \n");
+    return BM_ERR_FAILURE;
+  }
+
+  int rotation_angle = 0;
+
+  if (!dst.empty()) {
+    output = dst.getMat();
+    bool sizeValid = false;
+    if (rotateMode == 0 || rotateMode == 2) {
+        printf("(output.cols == m.rows && output.rows == m.cols) = %d\n", output.cols == m.rows && output.rows == m.cols);
+        printf("sizeValid = %d\n", sizeValid);
+        sizeValid = (output.cols == m.rows && output.rows == m.cols);
+    } else if (rotateMode == 1) {
+        sizeValid = (output.cols == m.cols && output.rows == m.rows);
+    }
+
+    printf("rotateMode = %d\n", rotateMode);
+    printf("output.cols = %d\n", output.cols);
+    printf("output.rows = %d\n", output.rows);
+    printf("m.rows = %d\n", m.rows);
+    printf("m.cols = %d\n", m.cols);
+
+    if (!sizeValid) {
+      printf("output size does not match input\n");
+      return BM_ERR_PARAM;
+    }
+    if (rotateMode == 0) {    // Rotate 90 degrees clockwise
+      rotation_angle = 90;
+    } else if (rotateMode == 1) {     // Rotate 180 degrees clockwise
+      rotation_angle = 180;
+    } else if (rotateMode == 2) {   // Rotate 270 degrees clockwise
+      rotation_angle = 270;
+    } else {
+      printf("bmcv_rotate not support rotation angle!\n");
+    }
+  } else {
+    if (rotateMode == 0) {    // Rotate 90 degrees clockwise
+      output.create(Size(m.rows, m.cols), m.type());
+      rotation_angle = 90;
+    } else if (rotateMode == 1) {     // Rotate 180 degrees clockwise
+      output.create(m.size(), m.type());
+      rotation_angle = 180;
+    } else if (rotateMode == 2) {   // Rotate 270 degrees clockwise
+      output.create(Size(m.rows, m.cols), m.type());
+      rotation_angle = 270;
+    } else {
+      printf("bmcv_rotate not support rotation angle!\n");
+      return BM_NOT_SUPPORTED;
+    }
+  }
+
+  bm_image src;
+  bm_image bm_output;
+  toBMI(m, &src, update);
+  toBMI(output, &bm_output, update);
+
+#ifdef USING_SOC
+ download(handle, output, &bm_output);
+#endif
+
+  ret = bmcv_image_rotate(handle, src, bm_output, rotation_angle);
+  if (ret != BM_SUCCESS) goto done;
+
+  bm_thread_sync(handle);
+  dst.assign(output);
+done:
+  bm_image_destroy(src);
+  bm_image_destroy(bm_output);
+  return ret;
+}
+
+bm_status_t rectangle(InputOutputArray _img, Point pt1, Point pt2, const Scalar& color, int thickness, bool update) {
+  Mat m;
+  if( _img.kind() != _InputOutputArray::MAT ) {printf("src must be of type cv::Mat.\n"); return BM_NOT_SUPPORTED;}
+  m = _img.getMat();
+  if (!m.u || !m.u->addr) {printf("Memory allocated by user, no device memory assigned. Not support BMCV!\n"); return BM_NOT_SUPPORTED;}
+  if (m.empty()) {
+    printf("Input Mat m neet to allocate memory at first!\n");
+    return BM_ERR_FAILURE;
+  }
+  bm_status_t ret = BM_SUCCESS;
+  bm_handle_t handle = m.u->hid ? m.u->hid : getCard();
+  if(handle == 0)
+  {
+    printf("bmcv is not open or src mat is not ION \n");
+    return BM_ERR_FAILURE;
+  }
+
+  bm_image src;
+
+  toBMI(m, &src, update);
+#ifdef USING_SOC
+  download(handle, m, &src);
+#endif
+
+  bmcv_rect_t brt;
+
+  brt.start_x = pt1.x;
+  brt.start_y = pt1.y;
+  brt.crop_w = pt2.x - pt1.x;
+  brt.crop_h = pt2.y - pt1.y;
+  CV_Assert((int)brt.start_x >= 0);
+  CV_Assert((int)brt.start_y >= 0);
+
+  int b = color[0];
+  int g = color[1];
+  int r = color[2];
+
+
+  if (thickness < 0) {
+    ret = bmcv_image_fill_rectangle(handle, src, 1, &brt, r, g, b);
+  } else {
+    if (thickness <= 1) ret = bmcv_image_draw_rectangle(handle, src, 1, &brt, 1, r, g, b);
+    else {
+      // ret = bmcv_image_draw_rectangle(handle, src, 1, &brt, thickness * 2 - thickness / 2, r, g, b);
+      ret = bmcv_image_draw_rectangle(handle, src, 1, &brt, thickness, r, g, b);
+    }
+  }
+  if (ret != BM_SUCCESS) goto done;
+
+  bm_thread_sync(handle);
+  _img.assign(m);
+
+#ifndef USING_SOC
+  if (update) download(handle, m, &src);
+#endif
+
+done:
+  bm_image_destroy(src);
+  return ret;
+}
+
+bm_status_t rectangle(InputOutputArray img, Rect rec, const Scalar& color, int thickness, bool update) {
+  Mat m;
+  if( img.kind() != _InputOutputArray::MAT ) {printf("src must be of type cv::Mat.\n"); return BM_NOT_SUPPORTED;}
+  m = img.getMat();
+  if (!m.u || !m.u->addr) {printf("Memory allocated by user, no device memory assigned. Not support BMCV!\n"); return BM_NOT_SUPPORTED;}
+  bm_status_t ret = BM_SUCCESS;
+  bm_handle_t handle = m.u->hid ? m.u->hid : getCard();
+  if (m.empty()) {
+    printf("Input Mat m need to allocate memory at first!\n");
+    return BM_ERR_FAILURE;
+  }
+  bm_image src;
+
+  toBMI(m, &src, update);
+#ifdef USING_SOC
+  download(handle, m, &src);
+#endif
+
+  bmcv_rect_t brt;
+  brt.start_x = rec.x;
+  brt.start_y = rec.y;
+  brt.crop_w = rec.width;
+  brt.crop_h = rec.height;
+  CV_Assert((int)brt.start_x >= 0);
+  CV_Assert((int)brt.start_y >= 0);
+
+  int b = color[0];
+  int g = color[1];
+  int r = color[2];
+
+  if (thickness < 0) {
+    ret = bmcv_image_fill_rectangle(handle, src, 1, &brt, r, g, b);
+  } else {
+    if (thickness <= 1) ret = bmcv_image_draw_rectangle(handle, src, 1, &brt, 1, r, g, b);
+    else {
+      // ret = bmcv_image_draw_rectangle(handle, src, 1, &brt, thickness * 2 - thickness / 2, r, g, b);
+      ret = bmcv_image_draw_rectangle(handle, src, 1, &brt, thickness, r, g, b);
+    }
+  }
+  if (ret != BM_SUCCESS) goto done;
+
+  bm_thread_sync(handle);
+  img.assign(m);
+#ifndef USING_SOC
+  if (update) download(handle, m, &src);
+#endif
+
+done:
+  bm_image_destroy(src);
+  return ret;
+}
+
+bm_status_t rectangle(Mat &m, std::vector<Rect> &vrt, const Scalar& color, int thickness, bool update) {
+  if (!m.u || !m.u->addr) {printf("Memory allocated by user, no device memory assigned. Not support BMCV!\n"); return BM_NOT_SUPPORTED;}
+  bm_status_t ret = BM_SUCCESS;
+  bm_handle_t handle = m.u->hid ? m.u->hid : getCard();
+  if (m.empty()) {
+    printf("Input Mat m need to allocate memory at first!\n");
+    return BM_ERR_FAILURE;
+  }
+  bm_image src;
+
+  toBMI(m, &src, update);
+
+  bmcv_rect_t *brt = new bmcv_rect_t[vrt.size()];
+
+  for (unsigned int i = 0; i < vrt.size(); i++) {
+    brt[i].start_x = vrt[i].x;
+    brt[i].start_y = vrt[i].y;
+    brt[i].crop_w = vrt[i].width;
+    brt[i].crop_h = vrt[i].height;
+    CV_Assert((int)brt[i].start_x >= 0);
+    CV_Assert((int)brt[i].start_y >= 0);
+  }
+  int b = color[0];
+  int g = color[1];
+  int r = color[2];
+
+#ifdef USING_SOC
+  download(handle, m, &src);
+#endif
+
+  if (thickness < 0) {
+    ret = bmcv_image_fill_rectangle(handle, src, vrt.size(), brt, r, g, b);
+  } else {
+    if (thickness <= 1) ret = bmcv_image_draw_rectangle(handle, src, vrt.size(), brt, 1, r, g, b);
+    else {
+      // ret = bmcv_image_draw_rectangle(handle, src, vrt.size(), brt, thickness * 2 - thickness / 2, r, g, b);
+      ret = bmcv_image_draw_rectangle(handle, src, vrt.size(), brt, thickness, r, g, b);
+    }
+  }
+  if (ret != BM_SUCCESS) goto done;
+
+  bm_thread_sync(handle);
+
+#ifndef USING_SOC
+  if (update) download(handle, m, &src);
+#endif
+
+done:
+  bm_image_destroy(src);
+  if (brt) delete[] brt;
+  return ret;
+}
+
+bm_status_t bitwise_and(InputArray a, InputArray b, OutputArray c, bool update) {
   Mat src0, src1, output;
   if (a.kind() != _InputArray::MAT || b.kind() != _InputArray::MAT || c.kind() != _OutputArray::MAT) {
     printf("src must be of type cv::Mat.\n");

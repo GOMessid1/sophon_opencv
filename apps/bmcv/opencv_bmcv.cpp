@@ -31,6 +31,10 @@ static void test_bmcv2cv(int argc, const char** argv);
 static void test_bitwise_and(int argc, const char** argv);
 static void test_bitwise_or(int argc, const char** argv);
 static void test_bitwise_xor(int argc, const char** argv);
+static void test_threshold(int argc, const char** argv);
+static void test_absdiff(int argc, const char** argv);
+static void test_rotate(int argc, const char** argv);
+static void test_rectangle(int argc, const char** argv);
 
 static const test_case_entry test_case_table[] = {
   {"conv_1", test_conv_1, {3,4}, 2},
@@ -43,6 +47,10 @@ static const test_case_entry test_case_table[] = {
   {"bitwise_and", test_bitwise_and, {4,5}, 2},
   {"bitwise_or", test_bitwise_or, {4,5}, 2},
   {"bitwise_xor", test_bitwise_xor, {4,5}, 2},
+  {"threshold", test_threshold, {4,5}, 2},
+  {"absdiff", test_absdiff, {4,5}, 2},
+  {"rotate", test_rotate, {4,5}, 2},
+  {"rectangle", test_rectangle, {3,4}, 2},
   // ...
 };
 
@@ -426,6 +434,402 @@ start:
     return;
 }
 
+static void test_threshold(int argc, const char** argv) {
+  bm_handle_t handle = NULL;
+  bm_status_t ret;
+  unsigned char thresh = 81;
+  unsigned char max_value = 255;
+  int type = 3;
+  /*-----------------------test BGR:-----------------------*/
+  printf("test BGR:\n");
+  Mat frame0 = imread(argv[2], IMREAD_COLOR, g_device_id);
+  Mat output(frame0.size(), frame0.type());
+  bool update = true;
+  handle = frame0.u->hid ? frame0.u->hid : bmcv::getCard();
+  ret = bmcv::threshold(frame0, output, thresh, max_value, type, update);
+  if (ret != BM_SUCCESS) {
+      printf("threshold test BGR failed!\n");
+      exit(-1);
+  }
+  bmcv::downloadMat(output);
+  imwrite("bm_bgr_threshold.png", output);
+  bmcv::print(output);
+
+  Mat cv_output;
+  cv::threshold(frame0, cv_output, thresh, max_value, type);
+  imwrite("cv_bgr_threshold.png", cv_output);
+  bmcv::print(cv_output);
+
+  /*-----------------------test GRAY:-----------------------*/
+  frame0.release();
+  output.release();
+  cv_output.release();
+  printf("test GRAY:\n");
+  frame0 = imread(argv[2], IMREAD_GRAYSCALE, g_device_id);
+  ret = bmcv::threshold(frame0, output, thresh, max_value, type, update);
+  if (ret != BM_SUCCESS) {
+      printf("threshold test GRAY failed!\n");
+      exit(-1);
+  }
+  bmcv::downloadMat(output);
+  imwrite("bm_gray_threshold.png", output);
+  bmcv::print(output);
+
+  cv::threshold(frame0, cv_output, thresh, max_value, type);
+  imwrite("cv_gray_threshold.png", cv_output);
+  bmcv::print(cv_output);
+
+  /*-----------------------test NV12:-----------------------*/
+  frame0.release();
+  output.release();
+  cv_output.release();
+  printf("test NV12:\n");
+  Mat frame1 = imread(argv[2], IMREAD_COLOR, g_device_id);
+
+  int W = frame1.cols;
+  int H = frame1.rows;
+  Mat output_nv12(H + H/2, W, CV_8UC1);
+  cv::Mat yuvI420;
+  cv::cvtColor(frame1, yuvI420, cv::COLOR_BGR2YUV_I420);
+  cv::Mat Y = yuvI420.rowRange(0, H);
+  cv::Mat U1 = yuvI420.rowRange(H, H + H/4).reshape(1, H/2);
+  cv::Mat V1 = yuvI420.rowRange(H + H/4, H + H/2).reshape(1, H/2);
+  cv::Mat UV(H/2, W, CV_8UC1);
+  for (int r = 0; r < H/2; ++r) {
+      const uint8_t* pu = U1.ptr<uint8_t>(r);
+      const uint8_t* pv = V1.ptr<uint8_t>(r);
+      uint8_t* puv = UV.ptr<uint8_t>(r);
+      for (int c = 0; c < W/2; ++c) {
+          puv[2*c] = pu[c]; // U
+          puv[2*c + 1] = pv[c]; // V
+      }
+  }
+  cv::Mat nv12(H + H/2, W, CV_8UC1);
+  Y.copyTo(nv12.rowRange(0, H));
+  UV.copyTo(nv12.rowRange(H, H + H/2));
+
+  ret = bmcv::threshold(nv12, output_nv12, thresh, max_value, type, update);
+  if (ret != BM_SUCCESS) {
+      printf("threshold test NV12 failed!\n");
+      exit(-1);
+  }
+  cv::Mat bgr_;
+  cv::cvtColor(output_nv12, bgr_, cv::COLOR_YUV2BGR_NV12);
+  imwrite("bm_nv12_threshold.png", bgr_);
+  bmcv::print(output_nv12);
+
+  return;
+}
+
+static void test_absdiff(int argc, const char** argv) {
+  bm_handle_t handle = NULL;
+    bm_status_t ret;
+    /*-----------------------test BGR:-----------------------*/
+    printf("test BGR:\n");
+    Mat frame0 = imread(argv[2], IMREAD_COLOR, g_device_id);
+    Mat frame1 = imread(argv[3], IMREAD_COLOR, g_device_id);
+    Mat output(frame0.size(), frame0.type());
+    bool update = true;
+    handle = frame0.u->hid ? frame0.u->hid : bmcv::getCard();
+    ret = bmcv::absdiff(frame0, frame1, output, update);
+    if (ret != BM_SUCCESS) {
+        printf("absdiff test BGR failed!\n");
+        exit(-1);
+    }
+    bmcv::downloadMat(output);
+    imwrite("bm_bgr_absdiff.png", output);
+    bmcv::print(output);
+
+    Mat cv_output;
+    cv::absdiff(frame0, frame1, cv_output);
+    imwrite("cv_bgr_absdiff.png", cv_output);
+    bmcv::print(cv_output);
+
+    /*-----------------------test GRAY:-----------------------*/
+    frame0.release();
+    frame1.release();
+    output.release();
+    cv_output.release();
+    printf("test GRAY:\n");
+    frame0 = imread(argv[2], IMREAD_GRAYSCALE, g_device_id);
+    frame1 = imread(argv[3], IMREAD_GRAYSCALE, g_device_id);
+    ret = bmcv::absdiff(frame0, frame1, output, update);
+    if (ret != BM_SUCCESS) {
+        printf("absdiff test GRAY failed!\n");
+        exit(-1);
+    }
+    bmcv::downloadMat(output);
+    imwrite("bm_gray_absdiff.png", output);
+    bmcv::print(output);
+
+    cv::absdiff(frame0, frame1, cv_output);
+    imwrite("cv_gray_absdiff.png", cv_output);
+    bmcv::print(cv_output);
+
+    /*-----------------------test NV12:-----------------------*/
+    frame0.release();
+    frame1.release();
+    output.release();
+    cv_output.release();
+    printf("test NV12:\n");
+
+    frame0 = imread(argv[2], IMREAD_COLOR, g_device_id);
+    frame1 = imread(argv[3], IMREAD_COLOR, g_device_id);
+
+    int W = frame0.cols;
+    int H = frame0.rows;
+    Mat output_nv12(H + H/2, W, CV_8UC1);
+    cv::Mat yuvI420_0;
+    cv::cvtColor(frame0, yuvI420_0, cv::COLOR_BGR2YUV_I420);
+    cv::Mat Y_0 = yuvI420_0.rowRange(0, H);
+    cv::Mat U1_0 = yuvI420_0.rowRange(H, H + H/4).reshape(1, H/2);
+    cv::Mat V1_0 = yuvI420_0.rowRange(H + H/4, H + H/2).reshape(1, H/2);
+    cv::Mat UV_0(H/2, W, CV_8UC1);
+    for (int r = 0; r < H/2; ++r) {
+        const uint8_t* pu = U1_0.ptr<uint8_t>(r);
+        const uint8_t* pv = V1_0.ptr<uint8_t>(r);
+        uint8_t* puv = UV_0.ptr<uint8_t>(r);
+        for (int c = 0; c < W/2; ++c) {
+            puv[2*c] = pu[c]; // U
+            puv[2*c + 1] = pv[c]; // V
+        }
+    }
+    cv::Mat nv12_0(H + H/2, W, CV_8UC1);
+    Y_0.copyTo(nv12_0.rowRange(0, H));
+    UV_0.copyTo(nv12_0.rowRange(H, H + H/2));
+
+    W = frame1.cols;
+    H = frame1.rows;
+    cv::Mat yuvI420_1;
+    cv::cvtColor(frame1, yuvI420_1, cv::COLOR_BGR2YUV_I420);
+    cv::Mat Y_1 = yuvI420_1.rowRange(0, H);
+    cv::Mat U1_1 = yuvI420_1.rowRange(H, H + H/4).reshape(1, H/2);
+    cv::Mat V1_1 = yuvI420_1.rowRange(H + H/4, H + H/2).reshape(1, H/2);
+    cv::Mat UV_1(H/2, W, CV_8UC1);
+    for (int r = 0; r < H/2; ++r) {
+        const uint8_t* pu = U1_1.ptr<uint8_t>(r);
+        const uint8_t* pv = V1_1.ptr<uint8_t>(r);
+        uint8_t* puv = UV_1.ptr<uint8_t>(r);
+        for (int c = 0; c < W/2; ++c) {
+            puv[2*c] = pu[c]; // U
+            puv[2*c + 1] = pv[c]; // V
+        }
+    }
+    cv::Mat nv12_1(H + H/2, W, CV_8UC1);
+    Y_1.copyTo(nv12_1.rowRange(0, H));
+    UV_1.copyTo(nv12_1.rowRange(H, H + H/2));
+
+    ret = bmcv::absdiff(nv12_0, nv12_1, output_nv12, update);
+    if (ret != BM_SUCCESS) {
+        printf("absdiff test NV12 failed!\n");
+        exit(-1);
+    }
+    cv::Mat bgr_;
+    cv::cvtColor(output_nv12, bgr_, cv::COLOR_YUV2BGR_NV12);
+    imwrite("bm_nv12_absdiff.png", bgr_);
+    bmcv::print(output_nv12);
+
+    return;
+}
+
+static void test_rectangle(int argc, const char** argv) {
+    bm_handle_t handle = NULL;
+    bm_status_t ret;
+    int start_x = 100, start_y = 100;
+    int crop_x = 200, crop_y = 200;
+    /*-----------------------test BGR:-----------------------*/
+    printf("test BGR:\n");
+    Mat frame0 = imread(argv[2], IMREAD_COLOR, g_device_id);
+    int b = 0;
+    int g = 0;
+    int r = 255;
+    int line_width = 2;
+    Rect rect_ = {start_x, start_y, crop_x, crop_y};
+    // Scalar color = {b, g, r};
+    Scalar color{static_cast<double>(b),
+        static_cast<double>(g),
+        static_cast<double>(r)};
+    Point point_1 = {start_x, start_y};
+    Point point_2 = {start_x + crop_x, start_y + crop_y};
+    bool update = true;
+    handle = frame0.u->hid ? frame0.u->hid : bmcv::getCard();
+
+    ret = bmcv::rectangle(frame0, point_1, point_2, color, line_width);
+    if (ret != BM_SUCCESS) {
+        printf("rectangle test BGR failed!\n");
+        exit(-1);
+    }
+    bmcv::downloadMat(frame0);
+    imwrite("bmcv_bgr_rectangle.png", frame0);
+    bmcv::print(frame0);
+
+    cv::rectangle(frame0, Point(start_x, start_y), Point(start_x + crop_x, start_y + crop_y), Scalar(b, g, r), line_width);
+    imwrite("opencv_bgr_rectangle.png", frame0);
+
+    /*-----------------------test GRAY:-----------------------*/
+    frame0.release();
+    printf("test GRAY:\n");
+
+    frame0 = imread(argv[2], IMREAD_GRAYSCALE, g_device_id);
+    ret = bmcv::rectangle(frame0, rect_, color, line_width);
+    if (ret != BM_SUCCESS) {
+        printf("rectangle test GRAY failed!\n");
+        exit(-1);
+    }
+    bmcv::downloadMat(frame0);
+    imwrite("bmcv_gray_rectangle.png", frame0);
+    bmcv::print(frame0);
+
+    cv::rectangle(frame0, Rect(start_x, start_y, crop_x, crop_y), Scalar(b, g, r), line_width);
+    imwrite("cv_gray_rectangle.png", frame0);
+
+    /*-----------------------test NV12:-----------------------*/
+    frame0.release();
+    printf("test NV12:\n");
+    Mat frame1 = imread(argv[2], IMREAD_COLOR, g_device_id);
+
+    int W = frame1.cols;
+    int H = frame1.rows;
+    cv::Mat yuvI420;
+    cv::cvtColor(frame1, yuvI420, cv::COLOR_BGR2YUV_I420);
+
+    cv::Mat Y = yuvI420.rowRange(0, H);
+    cv::Mat U1 = yuvI420.rowRange(H, H + H/4).reshape(1, H/2);
+    cv::Mat V1 = yuvI420.rowRange(H + H/4, H + H/2).reshape(1, H/2);
+    cv::Mat UV(H/2, W, CV_8UC1);
+
+    for (int r = 0; r < H/2; ++r) {
+        const uint8_t* pu = U1.ptr<uint8_t>(r);
+        const uint8_t* pv = V1.ptr<uint8_t>(r);
+        uint8_t* puv = UV.ptr<uint8_t>(r);
+        for (int c = 0; c < W/2; ++c) {
+            puv[2*c] = pu[c]; // U
+            puv[2*c + 1] = pv[c]; // V
+        }
+    }
+
+    cv::Mat nv12(H + H/2, W, CV_8UC1);
+    Y.copyTo(nv12.rowRange(0, H));
+    UV.copyTo(nv12.rowRange(H, H + H/2));
+
+    std::vector<Rect> vrt;
+    Rect rt(300, 200, 500, 200);
+    Rect rt1(100, 200, 300, 400);
+    Rect rt2(50, 100, 100, 500);
+    vrt= { rt, rt1, rt2 };
+    ret = bmcv::rectangle(nv12, vrt, color, line_width);
+    if (ret != BM_SUCCESS) {
+        printf("rectangle test NV12 failed!\n");
+        exit(-1);
+    }
+    bmcv::downloadMat(nv12);
+    cv::Mat bgr_;
+    cv::cvtColor(nv12, bgr_, cv::COLOR_YUV2BGR_NV12);
+    cv::imwrite("bm_nv12_rectangle.png", bgr_);
+    bmcv::print(nv12);
+
+    return;
+}
+
+static void test_rotate(int argc, const char** argv) {
+    bm_handle_t handle = NULL;
+    bm_status_t ret;
+    /*-----------------------test BGR:-----------------------*/
+    printf("test BGR:\n");
+    Mat frame0 = imread(argv[2], IMREAD_COLOR, g_device_id);
+    // Mat output(frame0.size(), frame0.type());
+    Mat output;
+    int rotation_angle[3] = {0, 1, 2};
+    bool update = true;
+    handle = frame0.u->hid ? frame0.u->hid : bmcv::getCard();
+    for (int i = 0; i < 3;i++) {
+        if (i == 1)
+            output.create(Size(frame0.cols, frame0.rows), frame0.type());
+        else
+            output.create(Size(frame0.rows, frame0.cols), frame0.type());
+        ret = bmcv::rotate(frame0, output, rotation_angle[i], update);
+        if (ret != BM_SUCCESS) {
+            printf("rotate test BGR failed!\n");
+            exit(-1);
+        }
+
+        bmcv::downloadMat(output);
+        imwrite("bm_bgr_rotate_" + std::to_string(i) + ".png", output);
+        bmcv::print(output);
+    }
+
+    /*-----------------------test GRAY:-----------------------*/
+    frame0.release();
+    output.release();
+    printf("test GRAY:\n");
+    for (int i = 0; i < 3;i++) {
+        if (i == 1)
+            output.create(Size(frame0.cols, frame0.rows), frame0.type());
+        else
+            output.create(Size(frame0.rows, frame0.cols), frame0.type());
+        frame0 = imread(argv[2], IMREAD_GRAYSCALE, g_device_id);
+        ret = bmcv::rotate(frame0, output, rotation_angle[i], update);
+        if (ret != BM_SUCCESS) {
+            printf("rotate test GRAY failed!\n");
+            exit(-1);
+        }
+        bmcv::downloadMat(output);
+        imwrite("bm_gray_rotate_" + std::to_string(i) + ".png", output);
+        bmcv::print(output);
+    }
+
+    /*-----------------------test NV12:-----------------------*/
+    frame0.release();
+    output.release();
+    printf("test NV12::\n");
+    Mat frame1 = imread(argv[2], IMREAD_COLOR, g_device_id);
+
+    int W = frame1.cols;
+    int H = frame1.rows;
+    cv::Mat yuvI420;
+    cv::cvtColor(frame1, yuvI420, cv::COLOR_BGR2YUV_I420);
+
+    cv::Mat Y = yuvI420.rowRange(0, H);
+    cv::Mat U1 = yuvI420.rowRange(H, H + H/4).reshape(1, H/2);
+    cv::Mat V1 = yuvI420.rowRange(H + H/4, H + H/2).reshape(1, H/2);
+    cv::Mat UV(H/2, W, CV_8UC1);
+
+    for (int r = 0; r < H/2; ++r) {
+        const uint8_t* pu = U1.ptr<uint8_t>(r);
+        const uint8_t* pv = V1.ptr<uint8_t>(r);
+        uint8_t* puv = UV.ptr<uint8_t>(r);
+        for (int c = 0; c < W/2; ++c) {
+            puv[2*c] = pu[c]; // U
+            puv[2*c + 1] = pv[c]; // V
+        }
+    }
+
+    cv::Mat nv12(H + H/2, W, CV_8UC1);
+    Y.copyTo(nv12.rowRange(0, H));
+    UV.copyTo(nv12.rowRange(H, H + H/2));
+
+    cv::Mat bgr_;
+    cv::cvtColor(nv12, bgr_, cv::COLOR_YUV2BGR_NV12);
+    cv::imwrite("nv12_rotate_debug.png", bgr_);
+
+    for (int i = 0; i < 3;i++) {
+        // cv::Size output_size = (i == 1) ? cv::Size(H, W + W/2) : cv::Size(W, H + H/2);
+        cv::Size output_size = (i == 1) ? cv::Size(H + H/2, W) : cv::Size(W + W/2, H);
+        // cv::Size output_size = (i == 1) ? cv::Size(1920, 1080) : cv::Size(1080, 1920);
+        cv::Mat out_nv12(output_size, CV_8UC1);
+
+        ret = bmcv::rotate(nv12, out_nv12, rotation_angle[i], update);
+        if (ret != BM_SUCCESS) {
+            printf("rotate test NV12 failed!\n");
+            exit(-1);
+        }
+        imwrite("bm_nv12_rotate_" + std::to_string(i) + ".png", out_nv12);
+        bmcv::print(out_nv12);
+    }
+
+    return;
+}
+
 static void test_bitwise_and(int argc, const char** argv) {
     bm_handle_t handle = NULL;
     bm_status_t ret;
@@ -692,6 +1096,10 @@ void print_usage(const char* prog) {
   printf("    %s bmcv2cv <jpeg_file> [device_id]\n", prog);
   printf("    %s bitwise_and <jpeg1> <jpeg2> [device_id]\n", prog);
   printf("    %s bitwise_or <jpeg1> <jpeg2> [device_id]\n", prog);
+  printf("    %s threshold <image1> [device_id]\n", prog);
+  printf("    %s absdiff <image1> [device_id]\n", prog);
+  printf("    %s rotate <image1> [device_id]\n", prog);
+  printf("    %s rectangle <image1> [device_id]\n", prog);
 }
 
 static const test_case_entry* parse_args(const char *arg) {
